@@ -598,14 +598,58 @@ void Trackball::rotate(double angle, const dvec3& axis)
 
 void Trackball::zoom(double ratio)
 {
-    dvec3 lookVector = _lookAt->center - _lookAt->eye;
-    _lookAt->eye = _lookAt->eye + lookVector * ratio;
+	bool isPerspective = true;
+	if (_camera->projectionMatrix)
+	{
+		// Try casting to Perspective projection
+		if (dynamic_cast<vsg::Perspective*>(_camera->projectionMatrix.get()))
+		{
+			isPerspective = true;
+		}
+		// Try casting to Orthographic projection
+		else if (dynamic_cast<vsg::Orthographic*>(_camera->projectionMatrix.get()))
+		{
+			isPerspective = false;
+		}
+	}
+	if (isPerspective)
+	{
+		dvec3 lookVector = _lookAt->center - _lookAt->eye;
+		_lookAt->eye = _lookAt->eye + lookVector * ratio;
+	}
+	else
+	{
+		dvec3 lookVector = _lookAt->center - _lookAt->eye;
+		_lookAt->eye = _lookAt->eye - lookVector * ratio;
+		_lookAt->center = _lookAt->center - lookVector * ratio;
+
+		vsg::Orthographic* ortho = dynamic_cast<vsg::Orthographic*>(_camera->projectionMatrix.get());
+		ortho->left *= ( 1.0 + ratio);
+		ortho->right *= (1.0 + ratio);
+		ortho->bottom *= (1.0 + ratio);
+		ortho->top *= (1.0 + ratio);
+	}
 
     clampToGlobe();
 }
 
 void Trackball::pan(const dvec2& delta)
 {
+	bool isPerspective = true;
+	if (_camera->projectionMatrix)
+	{
+		// Try casting to Perspective projection
+		if (dynamic_cast<vsg::Perspective*>(_camera->projectionMatrix.get()))
+		{
+			isPerspective = true;
+		}
+		// Try casting to Orthographic projection
+		else if (dynamic_cast<vsg::Orthographic*>(_camera->projectionMatrix.get()))
+		{
+			isPerspective = false;
+		}
+	}
+
     dvec3 lookVector = _lookAt->center - _lookAt->eye;
     dvec3 lookNormal = normalize(lookVector);
     dvec3 upNormal = _lookAt->up;
@@ -614,34 +658,60 @@ void Trackball::pan(const dvec2& delta)
     double distance = length(lookVector);
     distance *= 0.25;
 
-    if (_ellipsoidModel)
-    {
-        double scale = distance;
-        double angle = (length(delta) * scale) / _ellipsoidModel->radiusEquator();
+	if (isPerspective)
+	{
+		if (_ellipsoidModel)
+		{
+			double scale = distance;
+			double angle = (length(delta) * scale) / _ellipsoidModel->radiusEquator();
 
-        if (angle != 0.0)
-        {
-            dvec3 globeNormal = normalize(_lookAt->center);
-            dvec3 m = upNormal * (-delta.y) + sideNormal * (delta.x); // compute the position relative to the center in the eye plane
-            dvec3 v = m + lookNormal * dot(m, globeNormal);           // compensate for any tile relative to the globe normal
-            dvec3 axis = normalize(cross(globeNormal, v));            // compute the axis of rotation to map the mouse pan
+			if (angle != 0.0)
+			{
+				dvec3 globeNormal = normalize(_lookAt->center);
+				dvec3 m = upNormal * (-delta.y) + sideNormal * (delta.x); // compute the position relative to the center in the eye plane
+				dvec3 v = m + lookNormal * dot(m, globeNormal);           // compensate for any tile relative to the globe normal
+				dvec3 axis = normalize(cross(globeNormal, v));            // compute the axis of rotation to map the mouse pan
 
-            dmat4 matrix = vsg::rotate(-angle, axis);
+				dmat4 matrix = vsg::rotate(-angle, axis);
 
-            _lookAt->up = normalize(matrix * (_lookAt->eye + _lookAt->up) - matrix * _lookAt->eye);
-            _lookAt->center = matrix * _lookAt->center;
-            _lookAt->eye = matrix * _lookAt->eye;
+				_lookAt->up = normalize(matrix * (_lookAt->eye + _lookAt->up) - matrix * _lookAt->eye);
+				_lookAt->center = matrix * _lookAt->center;
+				_lookAt->eye = matrix * _lookAt->eye;
 
-            clampToGlobe();
-        }
-    }
-    else
-    {
-        dvec3 translation = sideNormal * (-delta.x * distance) + upNormal * (delta.y * distance);
+				clampToGlobe();
+			}
+		}
+		else
+		{
+			dvec3 translation = sideNormal * (-delta.x * distance) + upNormal * (delta.y * distance);
 
-        _lookAt->eye = _lookAt->eye + translation;
-        _lookAt->center = _lookAt->center + translation;
-    }
+			_lookAt->eye = _lookAt->eye + translation;
+			_lookAt->center = _lookAt->center + translation;
+		}
+	}
+	else
+	{
+		// Get view window size
+		double winWidth = _camera->viewportState->getViewport().width;
+		double winHeight = _camera->viewportState->getViewport().height;
+		double aspectRatio = winWidth / winHeight;
+		auto renderArea = _camera->getRenderArea();
+		double aspectRatio2 = static_cast<double>(renderArea.extent.width) / static_cast<double>(renderArea.extent.height);
+
+		vsg::Orthographic* ortho = dynamic_cast<vsg::Orthographic*>(_camera->projectionMatrix.get());
+		// Get the size of the orthographic view in world space
+		double viewWidth = fabs(ortho->right - ortho->left);
+		double viewHeight = fabs(ortho->top - ortho->bottom);
+
+		// Scale mouse movement to world coordinates
+		double dx = -delta.x * viewWidth / 2.0 / aspectRatio2;
+		double dy = delta.y * viewHeight / 2.0;
+
+		// Compute translation
+		vsg::dvec3 translation = sideNormal * dx + _lookAt->up * dy;
+		_lookAt->eye += translation;
+		_lookAt->center += translation;
+	}
 }
 
 void Trackball::addWindow(ref_ptr<Window> window, const ivec2& offset)

@@ -277,7 +277,8 @@ ref_ptr<TileDatabaseSettings> vsg::createOpenStreetMapSettings(ref_ptr<const Opt
     settings->originTopLeft = true;
     settings->lighting = false;
     settings->projection = "EPSG:3857"; // Spherical Mecator
-    settings->imageLayer = "http://a.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    //settings->imageLayer = "http://a.tile.openstreetmap.org/{z}/{x}/{y}.png";
+    settings->imageLayer = "https://tile.osm.ch/switzerland/{z}/{x}/{y}.png";
 
     return settings;
 }
